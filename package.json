@@ -1,6 +1,6 @@
 {
   "name": "anitare-bot",
-  "version": "0.0.0",
+  "version": "1.1.0",
   "private": true,
   "author": "yotchang4s",
   "description": "anitare bot",
@@ -18,7 +18,9 @@
     "hubot-scripts": "^2.5.16",
     "hubot-shipit": "^0.2.0",
     "hubot-slack": "^3.3.0",
-    "hubot-youtube": "^0.1.2"
+    "hubot-youtube": "^0.1.2",
+    "hubot-misawa": "0.1.0",
+    "hubot-meshi": "0.0.1"
   },
   "engines": {
     "node": "0.10.x"
