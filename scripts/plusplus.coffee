@@ -39,7 +39,7 @@ module.exports = (robot) ->
     # the increment/decrement operator ++ or --
     ([-+]{2}|—)
     # optional reason for the plusplus
-    (?:\s+(?:for|because|cause|cuz)\s+(.+))?
+    (?:\s+(.+))?
     $ # end of line
   ///i, (msg) ->
     # let's get our local vars in place
@@ -65,15 +65,9 @@ module.exports = (robot) ->
     # if we got a score, then display all the things and fire off events!
     if score?
       message = if reason?
-                  if reasonScore == 1 or reasonScore == -1
-                    "#{name} has #{score} points, #{reasonScore} of which is for #{reason}."
-                  else
-                    "#{name} has #{score} points, #{reasonScore} of which are for #{reason}."
+                  "#{reason}: (#{name}: #{score} GJ)"
                 else
-                  if score == 1
-                    "#{name} has #{score} point"
-                  else
-                    "#{name} has #{score} points"
+                  "(#{name}: #{score} GJ)"
                   
 
       msg.send message
