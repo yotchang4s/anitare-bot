@@ -10,130 +10,136 @@
 # Commands:
 #   <name>++
 #   <name>--
-#   hubot score <name>
+#   hubot score <name> [for <reason>]
 #   hubot top <amount>
 #   hubot bottom <amount>
+#   hubot erase <user> [<reason>]
+#   GET http://<url>/hubot/scores[?name=<name>][&direction=<top|botton>][&limit=<10>]
 #
 # Author:
 #   ajacksified
 
-_ = require("underscore")
-clark = require("clark").clark
 
-class ScoreKeeper
-  constructor: (@robot) ->
-    @cache =
-      scoreLog: {}
-      scores: {}
-
-    @robot.brain.on 'loaded', =>
-      @robot.brain.data.scores ||= {}
-      @robot.brain.data.scoreLog ||= {}
-
-      @cache.scores = @robot.brain.data.scores
-      @cache.scoreLog = @robot.brain.data.scoreLog
-
-  getUser: (user) ->
-    @cache.scores[user] ||= 0
-    user
-
-  saveUser: (user, from) ->
-    @saveScoreLog(user, from)
-    @robot.brain.data.scores[user] = @cache.scores[user]
-    @robot.brain.data.scoreLog[from] = @cache.scoreLog[from]
-    @robot.brain.emit('save', @robot.brain.data)
-
-    @cache.scores[user]
-
-  add: (user, from) ->
-    if @validate(user, from)
-      user = @getUser(user)
-      @cache.scores[user]++
-      @saveUser(user, from)
-
-  subtract: (user, from) ->
-    if @validate(user, from)
-      user = @getUser(user)
-      @cache.scores[user]--
-      @saveUser(user, from)
-
-  scoreForUser: (user) -> 
-    user = @getUser(user)
-    @cache.scores[user]
-
-  saveScoreLog: (user, from) ->
-    unless typeof @cache.scoreLog[from] == "object"
-      @cache.scoreLog[from] = {}
-
-    @cache.scoreLog[from][user] = new Date()
-
-  isSpam: (user, from) ->
-    @cache.scoreLog[from] ||= {}
-
-    if !@cache.scoreLog[from][user]
-      return false
-
-    dateSubmitted = @cache.scoreLog[from][user]
-
-    date = new Date(dateSubmitted)
-    messageIsSpam = date.setSeconds(date.getSeconds() + 30) > new Date()
-
-    if !messageIsSpam
-      delete @cache.scoreLog[from][user] #clean it up
-
-    messageIsSpam
-
-  validate: (user, from) ->
-    user != from && user != "" && !@isSpam(user, from)
-
-  length: () ->
-    @cache.scoreLog.length
-
-  top: (amount) ->
-    tops = []
-
-    for name, score of @cache.scores
-      tops.push(name: name, score: score)
-
-    tops.sort((a,b) -> b.score - a.score).slice(0,amount)
-
-  bottom: (amount) ->
-    all = @top(@cache.scores.length)
-    all.sort((a,b) -> b.score - a.score).reverse().slice(0,amount)
+_ = require('underscore')
+clark = require('clark')
+querystring = require('querystring')
+ScoreKeeper = require('./scorekeeper')
 
 module.exports = (robot) ->
-   robot.logger.warning "plusplus.coffee has merged with karma.coffee and moved from hubot-scripts to its own package. Remove it from your hubot-scripts.json and see https://github.com/ajacksified/hubot-plusplus for upgrade instructions"
   scoreKeeper = new ScoreKeeper(robot)
 
-  robot.hear /([\w\S]+)([\W\s]*)?(\+\+)$/i, (msg) ->
-    name = msg.match[1].trim().toLowerCase()
+  # sweet regex bro
+  robot.hear ///
+    # from beginning of line
+    ^
+    # the thing being upvoted, which is any number of words and spaces
+    ([\s\w'@.-:]*)
+    # allow for spaces after the thing being upvoted (@user ++)
+    \s*
+    # the increment/decrement operator ++ or --
+    ([-+]{2}|—)
+    # optional reason for the plusplus
+    (?:\s+(?:for|because|cause|cuz)\s+(.+))?
+    $ # end of line
+  ///i, (msg) ->
+    # let's get our local vars in place
+    [dummy, name, operator, reason] = msg.match
     from = msg.message.user.name.toLowerCase()
+    room = msg.message.room
 
-    newScore = scoreKeeper.add(name, from)
+    # do some sanitizing
+    reason = reason?.trim().toLowerCase()
+    name = (name.replace /(^\s*@)|([,:\s]*$)/g, "").trim().toLowerCase() if name
 
-    if newScore? then msg.send "#{name} has #{newScore} points."
+    # check whether a name was specified. use MRU if not
+    unless name? && name != ''
+      [name, lastReason] = scoreKeeper.last(room)
+      reason = lastReason if !reason? && lastReason?
 
-  robot.hear /([\w\S]+)([\W\s]*)?(\-\-)$/i, (msg) ->
-    name = msg.match[1].trim().toLowerCase()
+    # do the {up, down}vote, and figure out what the new score is
+    [score, reasonScore] = if operator == "++"
+              scoreKeeper.add(name, from, room, reason)
+            else
+              scoreKeeper.subtract(name, from, room, reason)
+
+    # if we got a score, then display all the things and fire off events!
+    if score?
+      message = if reason?
+                  if reasonScore == 1 or reasonScore == -1
+                    "#{name} has #{score} points, #{reasonScore} of which is for #{reason}."
+                  else
+                    "#{name} has #{score} points, #{reasonScore} of which are for #{reason}."
+                else
+                  if score == 1
+                    "#{name} has #{score} point"
+                  else
+                    "#{name} has #{score} points"
+                  
+
+      msg.send message
+
+      robot.emit "plus-one", {
+        name: name
+        direction: operator
+        room: room
+        reason: reason
+      }
+
+  robot.respond ///
+    (?:erase )
+    # thing to be erased
+    ([\s\w'@.-]+?)
+    # optionally erase a reason from thing
+    (?:\s+(?:for|because|cause|cuz)\s+(.+))?
+    $ # eol
+  ///i, (msg) ->
+    [__, name, reason] = msg.match
     from = msg.message.user.name.toLowerCase()
+    user = msg.envelope.user
+    room = msg.message.room
+    reason = reason?.trim().toLowerCase()
+    name = (name.replace /(^\s*@)|([,:\s]*$)/g, "").trim().toLowerCase() if name
 
-    newScore = scoreKeeper.subtract(name, from)
-    if newScore? then msg.send "#{name} has #{newScore} points."
+    isAdmin = @robot.auth?.hasRole(user, 'plusplus-admin') or @robot.auth?.hasRole(user, 'admin')
+
+    if not @robot.auth? or isAdmin
+      erased = scoreKeeper.erase(name, from, room, reason)
+    else
+      return msg.reply "Sorry, you don't have authorization to do that."
+
+    if erased?
+      message = if reason?
+                  "Erased the following reason from #{name}: #{reason}"
+                else
+                  "Erased points for #{name}"
+      msg.send message
 
   robot.respond /score (for\s)?(.*)/i, (msg) ->
     name = msg.match[2].trim().toLowerCase()
     score = scoreKeeper.scoreForUser(name)
+    reasons = scoreKeeper.reasonsForUser(name)
 
-    msg.send "#{name} has #{score} points."
+    reasonString = if typeof reasons == 'object' && Object.keys(reasons).length > 0
+                     "#{name} has #{score} points. here are some raisins:" +
+                     _.reduce(reasons, (memo, val, key) ->
+                       memo += "\n#{key}: #{val} points"
+                     , "")
+                   else
+                     "#{name} has #{score} points."
+
+    msg.send reasonString
 
   robot.respond /(top|bottom) (\d+)/i, (msg) ->
-    amount = parseInt(msg.match[2])
+    amount = parseInt(msg.match[2]) || 10
     message = []
 
     tops = scoreKeeper[msg.match[1]](amount)
 
-    for i in [0..tops.length-1]
-      message.push("#{i+1}. #{tops[i].name} : #{tops[i].score}")
+    if tops.length > 0
+      for i in [0..tops.length-1]
+        message.push("#{i+1}. #{tops[i].name} : #{tops[i].score}")
+    else
+      message.push("No scores to keep track of yet!")
 
     if(msg.match[1] == "top")
       graphSize = Math.min(tops.length, Math.min(amount, 20))
@@ -141,3 +147,29 @@ module.exports = (robot) ->
 
     msg.send message.join("\n")
 
+  robot.router.get "/#{robot.name}/normalize-points", (req, res) ->
+    scoreKeeper.normalize((score) ->
+      if score > 0
+        score = score - Math.ceil(score / 10)
+      else if score < 0
+        score = score - Math.floor(score / 10)
+
+      score
+    )
+
+    res.end JSON.stringify('done')
+
+  robot.router.get "/#{robot.name}/scores", (req, res) ->
+    query = querystring.parse(req._parsedUrl.query)
+
+    if query.name
+      obj = {}
+      obj[query.name] = scoreKeeper.scoreForUser(query.name)
+      res.end JSON.stringify(obj)
+    else
+      direction = query.direction || "top"
+      amount = query.limit || 10
+
+      tops = scoreKeeper[direction](amount)
+
+      res.end JSON.stringify(tops, null, 2)
