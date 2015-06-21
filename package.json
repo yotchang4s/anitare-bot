@@ -24,7 +24,7 @@
     "hubot-weather-ja": "0.0.1",
     "underscore": ">= 1.0.0",
     "clark": "0.0.6",
-    "hubot-choice": "0,0,0"
+    "hubot-choice": "0.0.0"
   },
   "engines": {
     "node": "0.10.x"
